@@ -1,108 +1,146 @@
+// lib/services/auth_service.dart
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_service.dart';
+import 'package:dio/dio.dart'; // Import DioError
 
-class AuthService with ChangeNotifier {
-  bool _isLoggedIn = false;
-  String? _userId;
-  String? _username;
-
-  bool get isLoggedIn => _isLoggedIn;
-  String? get userId => _userId;
-  String? get username => _username;
-
+class AuthService extends ChangeNotifier {
   final ApiService _apiService = ApiService();
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
-  // 초기화 - 저장된 사용자 정보 확인
-  Future<void> initialize() async {
-    final prefs = await SharedPreferences.getInstance();
-    _userId = prefs.getString('user_id');
-    _username = prefs.getString('username');
-    _isLoggedIn = _userId != null;
-    notifyListeners();
+  String? _token;
+  String? _userId;
+  bool _isAuthenticated = false;
+  bool _isLoading = true; // Start as true until initial check is done
+
+  String? get token => _token;
+  String? get userId => _userId;
+  bool get isAuthenticated => _isAuthenticated;
+  bool get isLoading => _isLoading; // Getter for loading state
+
+  AuthService() {
+    _checkAuthStatus();
   }
 
-  // 회원가입
-  Future<bool> register(String username, String email, String password,
-      String preferredLanguage) async {
-    try {
-      final response = await _apiService.register(
-          username, email, password, preferredLanguage);
-
-      // 사용자 정보 저장
-      _userId = response['user_id'];
-      _username = response['username'];
-      _isLoggedIn = true;
-
-      // SharedPreferences에 저장
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_id', _userId!);
-      await prefs.setString('username', _username!);
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      // 에러 발생시 로그인 실패 처리
-      print('회원가입 오류: $e');
-      return false;
+  // Internal method to update loading state and notify listeners
+  void _setLoading(bool value) {
+    if (_isLoading != value) {
+      _isLoading = value;
+      // Use WidgetsBinding to avoid calling notifyListeners during build phase if necessary
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+         if (hasListeners) { // Check if listeners exist before notifying
+             notifyListeners();
+         }
+      });
     }
   }
 
-  // 로그인
+
+  Future<void> _checkAuthStatus() async {
+    _setLoading(true);
+    try {
+      _token = await _storage.read(key: 'jwt');
+      _userId = await _storage.read(key: 'userId');
+      // TODO: Add token validation if needed (e.g., check expiry using jwt_decoder)
+      // if (_token != null) {
+      //   Map<String, dynamic> decodedToken = JwtDecoder.decode(_token!);
+      //   DateTime expiryDate = DateTime.fromMillisecondsSinceEpoch(decodedToken['exp'] * 1000);
+      //   if (DateTime.now().isAfter(expiryDate)) {
+      //      print("Token expired, logging out.");
+      //      await logout(); // Logout if expired
+      //      _token = null; // Ensure token is null after logout
+      //   }
+      // }
+      _isAuthenticated = _token != null;
+    } catch (e) {
+       print("Error reading auth status from storage: $e");
+        _isAuthenticated = false;
+        _token = null;
+        _userId = null;
+    } finally {
+       _setLoading(false);
+       // Initial check might need notification if UI depends on it immediately
+       // notifyListeners(); // Be careful calling notifyListeners directly in constructor/initState
+    }
+  }
+
   Future<bool> login(String email, String password) async {
+    _setLoading(true);
     try {
-      final response = await _apiService.login(email, password);
-
-      // 사용자 정보 저장
-      _userId = response['user_id'];
-      _username = response['username'] ??
-          email.split('@')[0]; // 유저네임이 없을 경우 이메일의 아이디 부분 사용
-      _isLoggedIn = true;
-
-      // SharedPreferences에 저장
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('user_id', _userId!);
-      await prefs.setString('username', _username!);
-
-      notifyListeners();
+      final response = await _apiService.login({'email': email, 'password': password});
+      _token = response.data['token'];
+      _userId = response.data['user_id'];
+      await _storage.write(key: 'jwt', value: _token);
+      await _storage.write(key: 'userId', value: _userId);
+      _isAuthenticated = true;
+      _setLoading(false);
       return true;
+    } on DioError catch (e) {
+      print('Login failed: ${e.response?.data ?? e.message}');
+      _isAuthenticated = false;
+      _setLoading(false);
+      return false;
     } catch (e) {
-      // 에러 발생시 로그인 실패 처리
-      print('로그인 오류: $e');
+      print('Login failed unexpectedly: $e');
+       _isAuthenticated = false;
+       _setLoading(false);
       return false;
     }
   }
 
-  // 로그아웃
-  Future<bool> logout() async {
-    try {
-      await _apiService.logout();
-
-      // 사용자 정보 초기화
-      _userId = null;
-      _username = null;
-      _isLoggedIn = false;
-
-      // SharedPreferences에서 삭제
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('user_id');
-      await prefs.remove('username');
-
-      notifyListeners();
-      return true;
-    } catch (e) {
-      print('로그아웃 오류: $e');
+   Future<bool> register(String username, String email, String password, String preferredLanguage) async {
+     _setLoading(true);
+     try {
+       final response = await _apiService.register({
+         'username': username,
+         'email': email,
+         'password': password,
+         'preferred_language': preferredLanguage,
+       });
+       _token = response.data['token'];
+       _userId = response.data['user_id'];
+       await _storage.write(key: 'jwt', value: _token);
+       await _storage.write(key: 'userId', value: _userId);
+       _isAuthenticated = true;
+       _setLoading(false);
+       return true;
+     } on DioError catch (e) {
+       print('Registration failed: ${e.response?.data ?? e.message}');
+        _isAuthenticated = false;
+        _setLoading(false);
+       return false;
+     } catch (e) {
+      print('Registration failed unexpectedly: $e');
+       _isAuthenticated = false;
+       _setLoading(false);
       return false;
-    }
-  }
+     }
+   }
 
-  // 사용자 정보 조회
-  Future<Map<String, dynamic>> getUserProfile() async {
-    // API 서비스를 통해 사용자 프로필 정보 조회 구현
-    // 현재는 간단히 저장된 정보 반환
-    return {
-      'user_id': _userId,
-      'username': _username,
-    };
+  Future<void> logout() async {
+    _setLoading(true);
+    final currentToken = _token; // Store token before clearing
+    _token = null;
+    _userId = null;
+    _isAuthenticated = false;
+    await _storage.delete(key: 'jwt');
+    await _storage.delete(key: 'userId');
+    // Notify listeners immediately about local state change
+    notifyListeners();
+
+    // Attempt to invalidate token on the backend, but don't block UI
+    if (currentToken != null) {
+        try {
+             // Manually set the Authorization header for this specific call
+             // as the interceptor might not have the token anymore.
+             await _apiService.logout();
+              print("Server logout successful");
+        } on DioError catch (e) {
+             print('Logout API call failed (might be expected if token was already invalid): ${e.response?.data ?? e.message}');
+        } catch (e) {
+             print('Logout API call failed unexpectedly: $e');
+        }
+    }
+    _setLoading(false); // Ensure loading is set to false after attempt
   }
 }

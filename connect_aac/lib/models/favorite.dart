@@ -1,40 +1,50 @@
-// lib/models/favorite.dart 추가
+// lib/models/favorite.dart
 class Favorite {
-  final String id;
-  final String userId;
-  final String itemId;
-  final int displayOrder;
-  final DateTime createdAt;
+    final String favoriteId;
+    final String itemId;
+    final String userId; // Included in response but maybe not needed in frontend model often
+    final String text; // Denormalized data from API response
+    final String? imagePath; // Denormalized data
+    final String categoryId; // Denormalized data
+    final int displayOrder;
+    final DateTime createdAt; // Included in response
 
-  const Favorite({
-    required this.id,
-    required this.userId,
-    required this.itemId,
-    this.displayOrder = 0,
-    required this.createdAt,
-  });
+    Favorite({
+        required this.favoriteId,
+        required this.itemId,
+        required this.userId,
+        required this.text,
+        this.imagePath,
+        required this.categoryId,
+        required this.displayOrder,
+        required this.createdAt,
+    });
 
-  // JSON 직렬화
-  Map<String, dynamic> toJson() {
-    return {
-      'favorite_id': id,
-      'user_id': userId,
-      'item_id': itemId,
-      'display_order': displayOrder,
-      'created_at': createdAt.toIso8601String(),
-    };
-  }
+     factory Favorite.fromJson(Map<String, dynamic> json) {
+        return Favorite(
+            favoriteId: json['favorite_id'] as String,
+            itemId: json['item_id'] as String,
+            userId: json['user_id'] as String? ?? '', // Handle potential null from API response
+            text: json['text'] as String? ?? '', // Handle potential null
+            imagePath: json['image_path'] as String?,
+            categoryId: json['category_id'] as String? ?? '', // Handle potential null
+            displayOrder: (json['display_order'] ?? 0) as int,
+            // Safely parse DateTime, provide default if parsing fails or value is null
+            createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
+        );
+    }
 
-  // JSON 역직렬화
-  factory Favorite.fromJson(Map<String, dynamic> json) {
-    return Favorite(
-      id: json['favorite_id'] ?? '',
-      userId: json['user_id'] ?? '',
-      itemId: json['item_id'] ?? '',
-      displayOrder: json['display_order'] ?? 0,
-      createdAt: json['created_at'] != null
-          ? DateTime.parse(json['created_at'])
-          : DateTime.now(),
-    );
-  }
+     // Helper for image URL (similar to VocabularyItem)
+      String? get fullImageUrl {
+         // TODO: Confirm how image paths are returned and adjust base URL if needed
+         const String imageBaseUrl = "http://localhost:5000"; // Example base URL
+         if (imagePath != null && imagePath!.isNotEmpty) {
+             if (imagePath!.startsWith('assets/')) { // Check for asset path
+                 return imagePath;
+             }
+             // Assume network path otherwise (adjust logic as needed)
+             return '$imageBaseUrl/$imagePath';
+         }
+         return null;
+     }
 }

@@ -1,217 +1,161 @@
 // lib/providers/settings_provider.dart
 import 'package:flutter/material.dart';
-import '../services/api_service.dart';
+import 'package:connect_aac/services/api_service.dart';
+// Import flutter_secure_storage or shared_preferences for local caching if needed
+// import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsProvider extends ChangeNotifier {
-  // TTS 관련 설정
-  bool _ttsEnabled = true;
-  String _voiceType = 'default';
-  double _speechRate = 1.0;
-  double _speechPitch = 1.0;
+   final ApiService _apiService;
+   bool _isLoading = false;
 
-  // UI 관련 설정
-  double _textSize = 1.0;
-  double _iconSize = 1.0;
-  ThemeMode _themeMode = ThemeMode.system;
-  int _gridColumns = 2;
+   // --- Default Settings ---
+   ThemeMode _themeMode = ThemeMode.system;
+   bool _ttsEnabled = true;
+   String _voiceType = 'default'; // Example: Get actual default from API/Config
+   double _speechRate = 1.0;
+   double _textSize = 16.0; // Example default text size
+   double _iconSize = 24.0; // Example default icon size
+   // Add other settings properties as needed
 
-  // 로딩 상태
-  bool _isLoading = true;
-  String? _error;
+   SettingsProvider(this._apiService) {
+     // Load settings from API or local storage on initialization
+     loadSettings();
+   }
 
-  // API 서비스
-  final ApiService _apiService = ApiService();
+   // --- Getters ---
+   ThemeMode get themeMode => _themeMode;
+   bool get isLoading => _isLoading;
+   bool get ttsEnabled => _ttsEnabled;
+   String get voiceType => _voiceType;
+   double get speechRate => _speechRate;
+   double get textSize => _textSize;
+   double get iconSize => _iconSize;
 
-  // 추가된 코드
-  bool _autoSpeak = true;
+   // --- Internal Loading Setter ---
+    Future<void> _setLoading(bool value) async {
+     if (_isLoading != value) {
+        _isLoading = value;
+         WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (hasListeners) notifyListeners();
+         });
+     }
+   }
 
-  // Getters
-  bool get ttsEnabled => _ttsEnabled;
-  String get voiceType => _voiceType;
-  double get speechRate => _speechRate;
-  double get speechPitch => _speechPitch;
-  double get textSize => _textSize;
-  double get iconSize => _iconSize;
-  ThemeMode get themeMode => _themeMode;
-  int get gridColumns => _gridColumns;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
-  bool get autoSpeak => _autoSpeak;
+   // --- Load and Save Settings ---
+   Future<void> loadSettings() async {
+       // TODO: Consider adding local caching (SharedPreferences) for faster load
+       // and fallback if API is unavailable.
+       await _setLoading(true);
+       try {
+           final response = await _apiService.getSettings();
+           final settingsData = response.data; // Assuming response.data contains the settings map
 
-  SettingsProvider() {
-    _loadSettings();
-  }
+           _themeMode = _parseThemeMode(settingsData['theme_mode'] ?? 'system');
+           _ttsEnabled = (settingsData['tts_enabled'] ?? true) as bool;
+           _voiceType = (settingsData['voice_type'] ?? 'default') as String;
+           _speechRate = (settingsData['speech_rate'] ?? 1.0).toDouble(); // Ensure double
+           _textSize = (settingsData['text_size'] ?? 16.0).toDouble();
+           _iconSize = (settingsData['icon_size'] ?? 24.0).toDouble();
+           // Load other settings...
 
-  // 설정 불러오기
-  Future<void> _loadSettings() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+           print("Settings loaded successfully.");
 
-    try {
-      // 백엔드에서 설정 데이터 불러오기
-      final settings = await _apiService.getSettings();
+       } catch(e) {
+           print("Failed to load settings from API: $e. Using defaults.");
+           // Keep default settings on error
+       } finally {
+           await _setLoading(false);
+       }
+   }
 
-      // TTS 설정
-      _ttsEnabled = settings['tts_enabled'] ?? true;
-      _voiceType = settings['voice_type'] ?? 'default';
-      _speechRate = settings['speech_rate'] ?? 1.0;
-      _speechPitch = settings['speech_pitch'] ?? 1.0;
+   // Saves all current settings to the backend
+   Future<bool> saveSettings() async {
+       if (_isLoading) return false; // Prevent concurrent saves
+       await _setLoading(true);
+       try {
+            final settingsData = {
+               'theme_mode': _themeMode.toString().split('.').last,
+               'tts_enabled': _ttsEnabled,
+               'voice_type': _voiceType,
+               'speech_rate': _speechRate,
+               'text_size': _textSize,
+               'icon_size': _iconSize,
+               // Add other settings...
+           };
+           await _apiService.saveSettings(settingsData);
+           print("Settings saved successfully.");
+           await _setLoading(false);
+           return true;
+       } catch(e) {
+           print("Failed to save settings: $e");
+           await _setLoading(false);
+           return false;
+       }
+   }
 
-      // UI 설정
-      _textSize = settings['text_size'] ?? 1.0;
-      _iconSize = settings['icon_size'] ?? 1.0;
-      _gridColumns = settings['grid_columns'] ?? 2;
+   // --- Individual Setting Modifiers ---
+   // These methods update the local state and trigger a save.
+   void setThemeMode(ThemeMode mode) {
+     if (_themeMode != mode) {
+       _themeMode = mode;
+       notifyListeners();
+       saveSettings(); // Save all settings when one changes
+     }
+   }
 
-      // 테마 설정
-      final themeString = settings['theme_mode'] ?? 'system';
-      switch (themeString) {
-        case 'light':
-          _themeMode = ThemeMode.light;
-          break;
-        case 'dark':
-          _themeMode = ThemeMode.dark;
-          break;
-        default:
-          _themeMode = ThemeMode.system;
-      }
+    void setTtsEnabled(bool enabled) {
+     if (_ttsEnabled != enabled) {
+       _ttsEnabled = enabled;
+       notifyListeners();
+       saveSettings();
+     }
+   }
 
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      print('설정 로드 오류: $e');
-      _error = '설정을 불러오는 중 오류가 발생했습니다.';
-      _isLoading = false;
+    void setVoiceType(String voice) {
+     if (_voiceType != voice) {
+       _voiceType = voice;
+       notifyListeners();
+       saveSettings();
+     }
+   }
 
-      // 오류 발생 시 기본 설정 사용
-      _initializeDefaultSettings();
-      notifyListeners();
-    }
-  }
+   void setSpeechRate(double rate) {
+     // Add validation/clamping if needed (e.g., rate between 0.5 and 2.0)
+     rate = rate.clamp(0.5, 2.0);
+     if (_speechRate != rate) {
+       _speechRate = rate;
+       notifyListeners();
+       saveSettings();
+     }
+   }
 
-  // 기본 설정 초기화
-  void _initializeDefaultSettings() {
-    _ttsEnabled = true;
-    _voiceType = 'default';
-    _speechRate = 1.0;
-    _speechPitch = 1.0;
-    _textSize = 1.0;
-    _iconSize = 1.0;
-    _gridColumns = 2;
-    _themeMode = ThemeMode.system;
-  }
+     void setTextSize(double size) {
+     // Add validation/clamping if needed
+     size = size.clamp(12.0, 30.0); // Example range
+     if (_textSize != size) {
+       _textSize = size;
+       notifyListeners();
+       saveSettings();
+     }
+   }
 
-  // 설정 저장
-  Future<bool> saveSettings() async {
-    try {
-      final settings = {
-        'tts_enabled': _ttsEnabled,
-        'voice_type': _voiceType,
-        'speech_rate': _speechRate,
-        'speech_pitch': _speechPitch,
-        'text_size': _textSize,
-        'icon_size': _iconSize,
-        'grid_columns': _gridColumns,
-        'theme_mode': _getThemeModeString(),
-      };
+    void setIconSize(double size) {
+     // Add validation/clamping if needed
+      size = size.clamp(18.0, 48.0); // Example range
+     if (_iconSize != size) {
+       _iconSize = size;
+       notifyListeners();
+       saveSettings();
+     }
+   }
 
-      // 백엔드에 설정 저장
-      await _apiService.saveSettings(settings);
-      return true;
-    } catch (e) {
-      print('설정 저장 오류: $e');
-      _error = '설정을 저장하는 중 오류가 발생했습니다.';
-      notifyListeners();
-      return false;
-    }
-  }
 
-  // 설정 업데이트 함수들
-
-  // TTS 활성화 설정
-  Future<bool> setTtsEnabled(bool enabled) async {
-    _ttsEnabled = enabled;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 음성 유형 설정
-  Future<bool> setVoiceType(String type) async {
-    _voiceType = type;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 음성 속도 설정
-  Future<bool> setSpeechRate(double rate) async {
-    _speechRate = rate;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 음성 높낮이 설정
-  Future<bool> setSpeechPitch(double pitch) async {
-    _speechPitch = pitch;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 텍스트 크기 설정
-  Future<bool> setTextSize(double size) async {
-    _textSize = size;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 아이콘 크기 설정
-  Future<bool> setIconSize(double size) async {
-    _iconSize = size;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 그리드 열 개수 설정
-  Future<bool> setGridColumns(int columns) async {
-    _gridColumns = columns;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // 테마 모드 설정
-  Future<bool> setThemeMode(ThemeMode mode) async {
-    _themeMode = mode;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  // ThemeMode를 문자열로 변환
-  String _getThemeModeString() {
-    switch (_themeMode) {
-      case ThemeMode.light:
-        return 'light';
-      case ThemeMode.dark:
-        return 'dark';
-      default:
-        return 'system';
-    }
-  }
-
-  // 추가된 코드
-  Future<bool> setAutoSpeak(bool value) async {
-    _autoSpeak = value;
-    notifyListeners();
-    return await saveSettings();
-  }
-
-  Future<bool> resetSettings() async {
-    _themeMode = ThemeMode.system;
-    _textSize = 1.0;
-    _iconSize = 1.0;
-    _gridColumns = 2;
-    _speechRate = 1.0;
-    _speechPitch = 1.0;
-    _autoSpeak = true;
-    notifyListeners();
-    return await saveSettings();
-  }
+   // --- Helper Methods ---
+    ThemeMode _parseThemeMode(String? modeStr) {
+       switch (modeStr?.toLowerCase()) {
+         case 'light': return ThemeMode.light;
+         case 'dark': return ThemeMode.dark;
+         default: return ThemeMode.system;
+       }
+     }
 }

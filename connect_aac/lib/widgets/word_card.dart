@@ -1,211 +1,151 @@
 // lib/widgets/word_card.dart
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../models/vocabulary_item.dart';
-import '../providers/favorites_provider.dart';
-import '../providers/settings_provider.dart';
-import '../services/tts_service.dart';
-import '../utils/app_theme.dart';
+import 'package:connect_aac/models/vocabulary_item.dart';
 
 class WordCard extends StatelessWidget {
   final VocabularyItem item;
-  final bool isHighlighted;
+  final bool isFavorite;
+  final bool isHighlighted; // To visually indicate selection/highlight
+  final VoidCallback? onTap; // Action when the card body is tapped
+  final VoidCallback? onFavoriteToggle; // Action for the favorite button
 
   const WordCard({
     super.key,
     required this.item,
-    this.isHighlighted = false,
+    this.isFavorite = false,
+    this.isHighlighted = false, // Default to false
+    this.onTap,
+    this.onFavoriteToggle,
   });
 
   @override
   Widget build(BuildContext context) {
-    final favoritesProvider = Provider.of<FavoritesProvider>(context);
-    final settingsProvider = Provider.of<SettingsProvider>(context);
-    final isFavorite = favoritesProvider.isFavorite(item.id);
-    final ttsService = TTSService();
+    final imageUrl = item.fullImageUrl; // Get potentially full URL or asset path
+    final theme = Theme.of(context);
 
-    // 설정에 따른 크기 조정
-    final double iconSize = 80 * settingsProvider.iconSize;
-    final double fontSize = 18 * settingsProvider.textSize;
-
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: isHighlighted
-                ? AppTheme.primaryColor.withOpacity(0.3)
-                : Colors.black.withOpacity(0.05),
-            blurRadius: isHighlighted ? 10 : 5,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Card(
-        elevation: 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: isHighlighted
-              ? BorderSide(color: AppTheme.primaryColor, width: 2)
-              : BorderSide.none,
-        ),
-        child: InkWell(
-          onTap: () {
-            ttsService.speak(item.text);
-
-            // 리플 효과 후 짧은 하이라이트 효과
-            Future.delayed(const Duration(milliseconds: 200), () {
-              ScaffoldMessenger.of(context).clearSnackBars();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('"${item.text}" 선택됨'),
-                  duration: const Duration(seconds: 1),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            });
-          },
-          borderRadius: BorderRadius.circular(20),
-          child: Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // 이미지 컨테이너
-                Expanded(
-                  child: Container(
-                    width: iconSize,
-                    height: iconSize,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryColor.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(16),
-                      child: _buildImage(context, iconSize),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // 텍스트
-                Text(
-                  item.text,
-                  style: TextStyle(
-                    fontSize: fontSize,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-
-                // 즐겨찾기 버튼
-                IconButton(
-                  icon: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    transitionBuilder:
-                        (Widget child, Animation<double> animation) {
-                      return ScaleTransition(scale: animation, child: child);
-                    },
-                    child: Icon(
-                      isFavorite
-                          ? Icons.star_rounded
-                          : Icons.star_border_rounded,
-                      key: ValueKey<bool>(isFavorite),
-                      color: isFavorite ? Colors.amber : Colors.grey,
-                      size: 28,
-                    ),
-                  ),
-                  onPressed: () {
-                    favoritesProvider.toggleFavorite(item.id);
-
-                    // 피드백 제공
-                    final message =
-                        isFavorite ? '즐겨찾기에서 제거되었습니다' : '즐겨찾기에 추가되었습니다';
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(message),
-                        duration: const Duration(seconds: 1),
-                        behavior: SnackBarBehavior.floating,
+    return Card(
+       elevation: isHighlighted ? 6 : 2, // Increase elevation if highlighted
+       clipBehavior: Clip.antiAlias, // Ensures ink splash/border radius applies correctly
+       shape: RoundedRectangleBorder(
+         borderRadius: BorderRadius.circular(16),
+         // Add a visual border if highlighted
+         side: isHighlighted
+             ? BorderSide(color: theme.colorScheme.primary, width: 2.5) // Thicker border
+             : BorderSide(color: theme.dividerColor.withOpacity(0.5), width: 0.5), // Subtle border always
+       ),
+       color: isHighlighted ? theme.colorScheme.primaryContainer.withOpacity(0.3) : theme.cardColor, // Background highlight
+      child: InkWell(
+        onTap: onTap, // Trigger main action on tap
+        borderRadius: BorderRadius.circular(16), // Match card shape for ink effect
+        child: Padding(
+          padding: const EdgeInsets.all(8.0), // Padding inside the card
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween, // Space out elements vertically
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // Image Area with Favorite Button Overlay
+              Expanded( // Allow image area to take available space
+                flex: 3, // Give more space to image
+                child: Stack(
+                  alignment: Alignment.topRight,
+                  children: [
+                    // Image or Placeholder Container
+                    Center(
+                      child: AspectRatio(
+                        aspectRatio: 1.0, // Keep image area square-ish
+                        child: Container(
+                           padding: const EdgeInsets.all(4), // Padding around image
+                           decoration: BoxDecoration(
+                             borderRadius: BorderRadius.circular(12),
+                             // Use a subtle background color based on theme
+                             color: theme.scaffoldBackgroundColor,
+                           ),
+                           // --- Image Display Logic ---
+                           child: _buildImageWidget(context, imageUrl, item, theme),
+                        ),
                       ),
-                    );
-                  },
+                    ),
+                    // Favorite Button (only if callback provided)
+                    if (onFavoriteToggle != null)
+                      Positioned( // Position precisely if needed
+                        top: -4, // Adjust position
+                        right: -4,
+                        child: IconButton(
+                          icon: Icon(
+                            isFavorite ? Icons.favorite : Icons.favorite_border,
+                            color: isFavorite ? Colors.redAccent : Colors.grey.shade500,
+                            size: 28, // Make favorite icon slightly larger
+                          ),
+                          // Reduce padding to make tappable area smaller if needed
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: onFavoriteToggle,
+                          tooltip: isFavorite ? '즐겨찾기 해제' : '즐겨찾기 추가',
+                        ),
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 8),
+              // Text Area
+              Expanded( // Allow text to take remaining space
+                 flex: 1,
+                 child: Center( // Center the text vertically
+                   child: Text(
+                      item.text,
+                      style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                      textAlign: TextAlign.center,
+                      maxLines: 2, // Allow up to two lines for text
+                      overflow: TextOverflow.ellipsis,
+                   ),
+                 ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  // 이미지 빌드 함수
-  Widget _buildImage(BuildContext context, double size) {
-    // 네트워크 또는 애셋 이미지 표시
-    if (item.imageAsset.startsWith('http')) {
-      // 네트워크 이미지
-      return Image.network(
-        item.imageAsset,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return _buildErrorImage(context, size);
-        },
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return Center(
-            child: CircularProgressIndicator(
-              value: loadingProgress.expectedTotalBytes != null
-                  ? loadingProgress.cumulativeBytesLoaded /
-                      loadingProgress.expectedTotalBytes!
-                  : null,
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryColor),
-            ),
-          );
-        },
-      );
-    } else {
-      // 애셋 이미지
-      return Image.asset(
-        item.imageAsset,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return _buildErrorImage(context, size);
-        },
-      );
-    }
-  }
+  // Helper widget to build the image display part
+  Widget _buildImageWidget(BuildContext context, String? imageUrl, VocabularyItem item, ThemeData theme) {
+       // Placeholder using initials
+     Widget placeholderWidget = Center(
+       child: Text(
+         item.text.isNotEmpty ? item.text[0] : '?', // Show first initial
+         style: TextStyle(
+             fontSize: 32,
+             fontWeight: FontWeight.bold,
+             color: theme.colorScheme.primary),
+       ),
+     );
 
-  // 이미지 로드 실패 시 표시할 위젯
-  Widget _buildErrorImage(BuildContext context, double size) {
-    return Container(
-      width: size,
-      height: size,
-      color: AppTheme.primaryColor.withOpacity(0.1),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.image_not_supported_rounded,
-            size: size * 0.4,
-            color: AppTheme.primaryColor.withOpacity(0.7),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            item.text,
-            style: TextStyle(
-              fontSize: 12,
-              color: AppTheme.primaryColor.withOpacity(0.9),
-            ),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
+     if (imageUrl != null) {
+       if (imageUrl.startsWith('assets/')) {
+         // Load from assets
+         return Image.asset(
+           imageUrl,
+           fit: BoxFit.contain, // Contain ensures the whole image is visible
+           errorBuilder: (_, __, ___) => placeholderWidget, // Fallback on error
+         );
+       } else {
+         // Load from network
+         // Use FadeInImage for smooth loading
+         return FadeInImage.assetNetwork(
+            // TODO: Add a suitable placeholder image in your assets
+            placeholder: 'assets/images/placeholder.png', // Path to your placeholder asset
+            image: imageUrl,
+            fit: BoxFit.contain,
+            placeholderErrorBuilder: (_, __, ___) => placeholderWidget, // Fallback if placeholder fails
+            imageErrorBuilder: (_, error, stackTrace) {
+              print("Error loading network image: $imageUrl, Error: $error");
+              return placeholderWidget; // Fallback on error
+            },
+          );
+       }
+     } else {
+       // If no image URL, return the placeholder
+       return placeholderWidget;
+     }
   }
 }

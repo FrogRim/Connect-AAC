@@ -1,105 +1,134 @@
 // lib/services/tts_service.dart
 import 'dart:typed_data';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // For kIsWeb
 import 'package:audioplayers/audioplayers.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:provider/provider.dart';
-import '../providers/settings_provider.dart';
 import 'api_service.dart';
+import 'package:dio/dio.dart'; // Import DioError for error handling
 
 class TTSService {
   final AudioPlayer _audioPlayer = AudioPlayer();
-  final ApiService _apiService = ApiService();
+  final ApiService _apiService = ApiService(); // Use ApiService for network calls
 
-  // 캐시 - 성능 최적화를 위해 이미 합성된 음성 저장
+  // Simple in-memory cache: Map<cacheKey, audioBytes>
+  // Key could be combination of text + voice + rate
   final Map<String, Uint8List> _audioCache = {};
 
-  // 초기화
+  // Optional: Configure AudioPlayer defaults if needed
+  TTSService() {
+    // Example: Set release mode for audio player if needed
+     _audioPlayer.setReleaseMode(ReleaseMode.stop);
+     // Example: Set default volume (can be adjusted later)
+     // _audioPlayer.setVolume(1.0);
+
+     // Handle player state changes or errors if necessary
+     _audioPlayer.onPlayerStateChanged.listen((state) {
+        print("AudioPlayer State: $state");
+     });
+      _audioPlayer.onPlayerComplete.listen((event) {
+         print("AudioPlayer Playback Complete");
+      });
+  }
+
+  // Initialization (currently not much needed unless setting up player defaults)
   Future<void> initialize() async {
-    // 필요한 초기화 작업 수행
+    print("TTS Service Initialized");
+    // Perform any async setup if required in the future
   }
 
-  // 음성 합성 및 재생
-  Future<void> speak(String text, {BuildContext? context}) async {
+  /// Synthesizes speech for the given text using specified voice and rate,
+  /// then plays the audio. Uses caching for performance.
+  Future<void> speak(
+    String text
+    //, {required String voiceType, // Make required or get from SettingsProvider elsewhere
+    //required double speechRate, // Make required or get from SettingsProvider elsewhere}
+) async {
+    if (text.isEmpty) {
+      print("TTS Error: Cannot speak empty text.");
+      return;
+    }
+
+    // Generate a unique key for caching based on content and settings
+    //final cacheKey = "$text|$voiceType|$speechRate";
+    final cacheKey = "text";
+
     try {
-      // 설정 값 가져오기 (제공된 경우)
-      String? voiceType;
-      double? speechRate;
+       // Check if audio is already playing, stop it first
+       if (_audioPlayer.state == PlayerState.playing) {
+           await _audioPlayer.stop();
+       }
 
-      if (context != null) {
-        final settingsProvider =
-            Provider.of<SettingsProvider>(context, listen: false);
-        voiceType = settingsProvider.voiceType;
-        speechRate = settingsProvider.speechRate;
-      } else {
-        // 컨텍스트가 없는 경우 SharedPreferences에서 직접 설정 가져오기
-        final prefs = await SharedPreferences.getInstance();
-        voiceType = prefs.getString('voice_type');
-        speechRate = prefs.getDouble('speech_rate');
-      }
+      Uint8List? audioBytes;
 
-      // 캐시 키 생성
-      final cacheKey = '$text-$voiceType-$speechRate';
-
-      // 캐시에 있는지 확인
+      // 1. Check cache
       if (_audioCache.containsKey(cacheKey)) {
-        // 캐시된 오디오 재생
-        await _playAudio(_audioCache[cacheKey]!);
+        print("TTS Cache HIT for key: $cacheKey");
+        audioBytes = _audioCache[cacheKey];
       } else {
-        // API에서 음성 데이터 가져오기
-        final audioData = await _apiService.synthesizeSpeech(
-          text,
-          voiceType: voiceType,
-          speechRate: speechRate,
-        );
+        print("TTS Cache MISS for key: $cacheKey. Fetching from API...");
+        // 2. Fetch from API if not in cache
+        try {
+           final response = await _apiService.synthesizeTTS({
+               'text': text,
+               //'voice_type': voiceType,
+               //'speech_rate': speechRate,
+           });
 
-        // 오디오 재생
-        await _playAudio(Uint8List.fromList(audioData));
+           // API returns binary data (List<int>), convert to Uint8List
+           if (response.data is List<int>) {
+              audioBytes = Uint8List.fromList(response.data as List<int>);
+              // Add to cache
+              _audioCache[cacheKey] = audioBytes;
+              print("TTS Audio fetched and cached (${audioBytes.lengthInBytes} bytes).");
+           } else {
+              print("TTS Error: API did not return expected binary data. Response type: ${response.data.runtimeType}");
+              // Fallback or throw specific error
+           }
 
-        // 캐시에 저장 (크기 제한 적용)
-        if (_audioCache.length >= 50) {
-          // 가장 오래된 항목 제거 (간단한 구현)
-          _audioCache.remove(_audioCache.keys.first);
+        } on DioError catch (e) {
+             print('TTS API Error: ${e.response?.statusCode} - ${e.response?.data ?? e.message}');
+             // Optionally re-throw or handle specific errors (e.g., rate limits)
+             // return; // Stop execution on API error
+             throw Exception('Failed to synthesize speech via API.'); // Re-throw
+        } catch (e) {
+            print('TTS Unexpected Error during API call: $e');
+            throw Exception('Unexpected error during speech synthesis.'); // Re-throw
+            // return;
         }
-        _audioCache[cacheKey] = Uint8List.fromList(audioData);
       }
+
+      // 3. Play audio if bytes are available
+      if (audioBytes != null && audioBytes.isNotEmpty) {
+        print("Playing TTS audio...");
+        // Use BytesSource for playing from memory
+        await _audioPlayer.play(BytesSource(audioBytes));
+      } else {
+         print("TTS Error: Audio data is null or empty after fetch/cache check.");
+      }
+
     } catch (e) {
-      print('TTS 오류: $e');
-      // 오류 발생 시 로컬 TTS로 대체하거나 사용자에게 알림
+      print('TTS Playback Error: $e');
+      // Handle playback errors (e.g., show a message to the user)
+       // Consider stopping the player in case of error
+       await _audioPlayer.stop();
     }
   }
 
-  // 오디오 재생 함수
-  Future<void> _playAudio(Uint8List audioData) async {
-    try {
-      // 이전 재생 중지
+   // Optional: Method to stop any ongoing playback
+   Future<void> stop() async {
+      print("Stopping TTS playback.");
       await _audioPlayer.stop();
+   }
 
-      // 새 오디오 재생
-      await _audioPlayer.play(BytesSource(audioData));
-    } catch (e) {
-      print('오디오 재생 오류: $e');
-    }
-  }
+   // Optional: Method to clear the cache
+   void clearCache() {
+      print("Clearing TTS cache.");
+      _audioCache.clear();
+   }
 
-  // 재생 중지
-  Future<void> stop() async {
-    await _audioPlayer.stop();
-  }
-
-  // 리소스 해제
-  void dispose() {
-    _audioPlayer.dispose();
-    _audioCache.clear();
-  }
-
-  // 음성 속도 설정
-  void setSpeechRate(double rate) {
-    // 음성 속도 설정은 speak 메서드에서 처리됨
-  }
-
-  // 음성 높낮이 설정
-  void setPitch(double pitch) {
-    // 음성 높낮이 설정은 speak 메서드에서 처리됨
-  }
+   // Optional: Dispose resources when service is no longer needed
+   // (e.g., in the dispose method of a StatefulWidget or Provider)
+   void dispose() {
+       print("Disposing TTS Service");
+       _audioPlayer.dispose();
+   }
 }

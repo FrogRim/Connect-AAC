@@ -1,66 +1,53 @@
 // lib/main.dart
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:connect_aac/providers/vocabulary_provider.dart';
+import 'package:connect_aac/providers/favorites_provider.dart';
+import 'package:connect_aac/providers/settings_provider.dart';
+import 'package:connect_aac/providers/chat_provider.dart';
+import 'package:connect_aac/services/auth_service.dart'; // Import AuthService
+import 'package:connect_aac/services/api_service.dart'; // Import ApiService
+import 'package:connect_aac/utils/app_theme.dart';
+import 'package:connect_aac/screens/splash_screen.dart';
 
-import 'screens/splash_screen.dart';
-import 'providers/vocabulary_provider.dart';
-import 'providers/settings_provider.dart';
-import 'providers/favorites_provider.dart';
-import 'providers/chat_provider.dart';
-import 'services/auth_service.dart';
-import 'utils/app_theme.dart';
-
-void main() async {
+void main() {
+  // Ensure Flutter bindings are initialized (good practice)
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Allow both portrait and landscape orientations
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
-
-  runApp(const MyApp());
+  runApp(const ConnectAACApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class ConnectAACApp extends StatelessWidget {
+  const ConnectAACApp({super.key});
 
   @override
   Widget build(BuildContext context) {
+    // Create ApiService instance once
+    final apiService = ApiService();
+
     return MultiProvider(
       providers: [
-        // 인증 서비스 추가
-        ChangeNotifierProvider(create: (_) => AuthService()),
+        // Provide ApiService itself if needed by multiple providers/widgets
+        Provider<ApiService>.value(value: apiService),
 
-        // 기존 프로바이더들
-        ChangeNotifierProvider(create: (_) => VocabularyProvider()),
-        ChangeNotifierProvider(create: (_) => SettingsProvider()),
-        ChangeNotifierProvider(create: (_) => FavoritesProvider()),
-        ChangeNotifierProvider(create: (_) => ChatProvider()),
+        // ChangeNotifierProvider for Authentication
+        ChangeNotifierProvider(create: (_) => AuthService()), // AuthService uses its own ApiService instance
+
+        // Other providers that depend on ApiService
+        // Use the ApiService instance created above
+        ChangeNotifierProvider(create: (_) => VocabularyProvider(apiService)),
+        ChangeNotifierProvider(create: (_) => FavoritesProvider(apiService)),
+        ChangeNotifierProvider(create: (_) => SettingsProvider(apiService)),
+        ChangeNotifierProvider(create: (_) => ChatProvider(apiService)),
+        // Add other providers if necessary, providing ApiService if needed
       ],
-      child: Consumer2<SettingsProvider, AuthService>(
-        builder: (context, settings, auth, _) {
+      child: Consumer<SettingsProvider>( // Consume SettingsProvider for theme
+        builder: (context, settingsProvider, child) {
           return MaterialApp(
             title: 'Connect AAC',
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
-            themeMode: settings.themeMode,
-            localizationsDelegates: const [
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            supportedLocales: const [
-              Locale('ko', 'KR'), // Korean
-              Locale('en', 'US'), // English
-            ],
-            locale: const Locale('ko', 'KR'),
-            // 시작 화면을 스플래시 화면으로 변경
-            home: const SplashScreen(),
+            theme: AppTheme.lightTheme, // Use light theme from AppTheme
+            darkTheme: AppTheme.darkTheme, // Use dark theme from AppTheme
+            themeMode: settingsProvider.themeMode, // Control theme mode via SettingsProvider
+            home: const SplashScreen(), // Start with SplashScreen
             debugShowCheckedModeBanner: false,
           );
         },

@@ -2,11 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
-import '../providers/settings_provider.dart';
 import '../services/tts_service.dart';
 import '../widgets/app_scaffold.dart';
 import '../widgets/chat_bubble.dart';
-import '../models/chat_message.dart';
+//import '../models/chat_message.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -46,7 +45,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     final chatProvider = Provider.of<ChatProvider>(context);
-    final settingsProvider = Provider.of<SettingsProvider>(context);
     final messages = chatProvider.messages;
 
     // Auto-scroll to bottom when new messages are added
@@ -98,7 +96,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       return ChatBubble(
                         message: message,
                         onTapDelete: () {
-                          _ttsService.speak(message.text);
+                          _ttsService.speak(message.text,);
                         },
                       );
                     },
@@ -139,7 +137,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     textInputAction: TextInputAction.send,
                     onSubmitted: (value) {
                       if (value.trim().isNotEmpty) {
-                        chatProvider.sendMessage(value);
+                        chatProvider.sendMessage(value,'user');
                         _controller.clear();
                       }
                     },
@@ -149,7 +147,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 FloatingActionButton(
                   onPressed: () {
                     if (_controller.text.trim().isNotEmpty) {
-                      chatProvider.sendMessage(_controller.text);
+                      chatProvider.sendMessage(_controller.text, 'user');
                       _controller.clear();
                     }
                   },

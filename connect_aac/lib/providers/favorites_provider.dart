@@ -1,162 +1,127 @@
 // lib/providers/favorites_provider.dart
 import 'package:flutter/material.dart';
-import '../models/vocabulary_item.dart';
-import '../services/api_service.dart';
+import 'package:connect_aac/services/api_service.dart';
+import 'package:connect_aac/models/favorite.dart'; // Use Favorite model
 
 class FavoritesProvider extends ChangeNotifier {
-  List<VocabularyItem> _favorites = [];
-  bool _isLoading = true;
-  String? _error;
+  final ApiService _apiService;
+   List<Favorite> _favorites = []; // Use Favorite model
+   bool _isLoading = false;
+   String? _error;
+   
 
-  // 즐겨찾기 ID와 어휘 항목 ID 매핑
-  Map<String, String> _favoriteIds = {}; // Map<item_id, favorite_id>
+   FavoritesProvider(this._apiService) {
+     // Optionally fetch favorites immediately, or lazily when needed
+     // fetchFavorites();
+   }
 
-  // API 서비스
-  final ApiService _apiService = ApiService();
+   // --- Getters ---
+   List<Favorite> get favorites => _favorites;
+   bool get isLoading => _isLoading;
+   String? get error => _error;
 
-  // Getters
-  List<VocabularyItem> get favorites => _favorites;
-  bool get isLoading => _isLoading;
-  String? get error => _error;
+   // --- Internal Loading Setter ---
+   Future<void> _setLoading(bool value) async {
+     if (_isLoading != value) {
+        _isLoading = value;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (hasListeners) notifyListeners();
+        });
+     }
+   }
 
-  FavoritesProvider() {
-    _loadFavorites();
-  }
+   // --- Data Fetching ---
+   Future<void> fetchFavorites() async {
+     // Prevent concurrent fetches
+     if (_isLoading) return;
 
-  // 즐겨찾기 로드
-  Future<void> _loadFavorites() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+     await _setLoading(true);
+     try {
+       final response = await _apiService.getFavorites();
+       final List<dynamic> favJson = response.data['favorites'] ?? [];
+       _favorites = favJson.map((json) => Favorite.fromJson(json)).toList();
+        // Sort favorites by display order
+       _favorites.sort((a,b) => a.displayOrder.compareTo(b.displayOrder));
+     } catch (e) {
+       print("Error fetching favorites: $e");
+       _favorites = []; // Clear on error
+     } finally {
+        await _setLoading(false);
+     }
+   }
 
-    try {
-      // 백엔드에서 즐겨찾기 목록 가져오기
-      final items = await _apiService.getFavorites();
-      _favorites = items;
-
-      // 즐겨찾기 ID 매핑 구성
-      _favoriteIds = {};
-      for (var item in items) {
-        _favoriteIds[item.id] = item.id; // 실제 API 응답에서는 favorite_id 매핑 필요
-      }
-
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      print('즐겨찾기 로드 오류: $e');
-      _error = '즐겨찾기를 불러오는 중 오류가 발생했습니다.';
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  // 즐겨찾기 새로고침
-  Future<void> refreshFavorites() async {
-    await _loadFavorites();
-  }
-
-  // 즐겨찾기 여부 확인
-  bool isFavorite(String itemId) {
-    return _favoriteIds.containsKey(itemId);
-  }
-
-  // 즐겨찾기 토글
-  Future<bool> toggleFavorite(String itemId) async {
-    try {
+   // --- Modification Methods ---
+    Future<bool> addFavorite(String itemId) async {
+      // Prevent adding if already favorited
       if (isFavorite(itemId)) {
-        // 즐겨찾기 제거
-        final favoriteId = _favoriteIds[itemId];
-        if (favoriteId != null) {
-          final success = await _apiService.removeFavorite(favoriteId);
+         print("Item $itemId already in favorites.");
+         return false;
+      }
+      // Avoid concurrent modifications
+      if (_isLoading) return false;
 
-          if (success) {
-            _favorites.removeWhere((item) => item.id == itemId);
-            _favoriteIds.remove(itemId);
-            notifyListeners();
-          }
-
-          return success;
-        }
-        return false;
-      } else {
-        // 즐겨찾기 추가
-        final response = await _apiService.addFavorite(itemId);
-
-        if (response.containsKey('favorite_id')) {
-          // 실제 어휘 항목 객체를 가져와서 추가해야 함
-          // 임시로 ID만 사용하여 구현
-          final item = _getFavoriteItemById(itemId);
-
-          if (item != null) {
-            _favorites.add(item);
-            _favoriteIds[itemId] = response['favorite_id'];
-            notifyListeners();
-            return true;
-          }
-        }
+      await _setLoading(true);
+      try {
+        await _apiService.addFavorite(itemId);
+        // Refetch favorites to get the updated list and order from the server
+        await fetchFavorites(); // This will set loading to false and notify listeners
+        return true;
+      } catch (e) {
+        print("Error adding favorite: $e");
+        await _setLoading(false); // Ensure loading is false on error
         return false;
       }
-    } catch (e) {
-      print('즐겨찾기 토글 오류: $e');
-      return false;
     }
-  }
 
-  // 임시 메서드: 일반적으로는 VocabularyProvider에서 아이템을 가져와야 함
-  VocabularyItem? _getFavoriteItemById(String itemId) {
-    try {
-      // 여기서는 간단히 처리하기 위해 임시 객체 생성
-      // 실제 구현에서는 Provider 간 의존성 적절히 처리 필요
-      return VocabularyItem(
-        id: itemId,
-        text: "아이템 $itemId",
-        imageAsset: "assets/images/placeholder.png",
-        categoryId: "unknown",
-      );
-    } catch (e) {
-      return null;
-    }
-  }
+     // Deletes a favorite based on the VocabularyItem's ID
+     Future<bool> deleteFavoriteByItemId(String itemId) async {
+         final favoriteId = getFavoriteId(itemId);
+         if (favoriteId == null) {
+             print("Item $itemId not found in favorites to delete.");
+             return false; // Not favorited
+         }
+          // Avoid concurrent modifications
+         if (_isLoading) return false;
 
-  // 즐겨찾기 순서 변경
-  Future<bool> reorderFavorites(
-      List<String> favoriteIds, List<int> newOrders) async {
-    try {
-      // 백엔드 API 호출 (실제 구현 필요)
-      // final success = await _apiService.updateFavoriteOrder(favoriteIds, newOrders);
+         return await deleteFavorite(favoriteId); // Reuse the delete by favorite ID logic
+     }
 
-      // 임시 구현: 로컬에서만 순서 변경
-      // 실제 구현 시 백엔드 API 연동 필요
-      final tempFavorites = List<VocabularyItem>.from(_favorites);
-      _favorites = [];
+     // Deletes a favorite based on the Favorite's own ID
+      Future<bool> deleteFavorite(String favoriteId) async {
+           // Avoid concurrent modifications
+          if (_isLoading) return false;
 
-      for (int i = 0; i < favoriteIds.length; i++) {
-        final favoriteId = favoriteIds[i];
-        final item = tempFavorites.firstWhere(
-          (item) => _favoriteIds[item.id] == favoriteId,
-          orElse: () => tempFavorites[0], // 오류 방지
-        );
-
-        _favorites.add(item);
+          await _setLoading(true);
+          try {
+              await _apiService.deleteFavorite(favoriteId);
+              // Refetch the updated list from the server
+              await fetchFavorites(); // This will set loading to false and notify
+              return true;
+          } catch (e) {
+              print("Error deleting favorite with ID $favoriteId: $e");
+              await _setLoading(false); // Ensure loading is false on error
+              return false;
+          }
       }
 
-      notifyListeners();
-      return true;
-    } catch (e) {
-      print('즐겨찾기 순서 변경 오류: $e');
-      return false;
-    }
-  }
+     // --- Helper Methods ---
+     // Method to check if an item is already favorited
+     bool isFavorite(String itemId) {
+       return _favorites.any((fav) => fav.itemId == itemId);
+     }
 
-  Future<bool> clearFavorites() async {
-    try {
-      await _apiService.clearFavorites();
-      _favorites.clear();
-      notifyListeners();
-      return true;
-    } catch (e) {
-      print('즐겨찾기 초기화 오류: $e');
-      return false;
-    }
-  }
+      // Get favorite ID for a given item ID
+      String? getFavoriteId(String itemId) {
+        try {
+          // Use firstWhereOrNull for safety if using 'collection' package
+          return _favorites.firstWhere((fav) => fav.itemId == itemId).favoriteId;
+        } catch (e) {
+          return null; // Not found
+        }
+      }
+
+      Future<void> refreshFavorites() async
+      {
+        await fetchFavorites();
+      }
 }

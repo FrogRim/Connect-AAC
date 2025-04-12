@@ -1,178 +1,163 @@
 // lib/providers/vocabulary_provider.dart
 import 'package:flutter/material.dart';
-import '../models/vocabulary_item.dart';
-import '../models/category.dart';
-import '../services/api_service.dart';
+import 'package:connect_aac/services/api_service.dart';
+import 'package:connect_aac/models/category.dart';
+import 'package:connect_aac/models/vocabulary_item.dart';
 
 class VocabularyProvider extends ChangeNotifier {
-  List<Category> _categories = [];
-  List<VocabularyItem> _vocabularyItems = [];
-  bool _isLoading = true;
+  final ApiService _apiService;
+  List<Category> _categories = []; // Use Category model
+  List<VocabularyItem> _items = []; // Use VocabularyItem model (items for current category)
+  bool _isLoadingCategories = false;
+  bool _isLoadingItems = false;
+  bool _isLoadingSearch = false;
   String _searchQuery = '';
+  List<VocabularyItem> _searchResults = []; // Use VocabularyItem model
+  List<Category> _searchCategories = []; // Use Category model
 
-  // 에러 상태 관리
-  String? _error;
+  VocabularyProvider(this._apiService) {
+    fetchCategories(); // Fetch categories on initialization
+  }
 
-  // API 서비스
-  final ApiService _apiService = ApiService();
-
-  // Getters
+  // --- Getters ---
   List<Category> get categories => _categories;
-  List<VocabularyItem> get vocabularyItems => _vocabularyItems;
-  bool get isLoading => _isLoading;
+  List<VocabularyItem> get items => _items; // Items for the current category
+  bool get isLoading => _isLoadingCategories || _isLoadingItems || _isLoadingSearch; // Combined loading state
+  bool get isLoadingCategories => _isLoadingCategories;
+  bool get isLoadingItems => _isLoadingItems;
+  bool get isLoadingSearch => _isLoadingSearch;
   String get searchQuery => _searchQuery;
-  String? get error => _error;
+  List<VocabularyItem> get searchResults => _searchResults;
+  List<Category> get searchCategories => _searchCategories;
 
-  VocabularyProvider() {
-    _initializeData();
+  // --- Internal Loading Setters ---
+  // These help manage specific loading states and notify listeners
+  Future<void> _setLoadingCategories(bool value) async {
+    if (_isLoadingCategories != value) {
+      _isLoadingCategories = value;
+      // Use WidgetsBinding to prevent calling notifyListeners during build phase
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (hasListeners) notifyListeners();
+      });
+    }
   }
 
-  // 데이터 초기화 - 백엔드에서 데이터 가져오기
-  Future<void> _initializeData() async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
+  Future<void> _setLoadingItems(bool value) async {
+    if (_isLoadingItems != value) {
+      _isLoadingItems = value;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+           if (hasListeners) notifyListeners();
+      });
+    }
+  }
 
+    Future<void> _setLoadingSearch(bool value) async {
+    if (_isLoadingSearch != value) {
+      _isLoadingSearch = value;
+       WidgetsBinding.instance.addPostFrameCallback((_) {
+           if (hasListeners) notifyListeners();
+       });
+    }
+  }
+
+
+  // --- Data Fetching Methods ---
+  Future<void> fetchCategories() async {
+    await _setLoadingCategories(true);
     try {
-      // 카테고리 가져오기
-      _categories = await _apiService.getCategories();
+      final response = await _apiService.getCategories();
+      // Map JSON list to List<Category>
+      final List<dynamic> categoryJson = response.data['categories'] ?? [];
+      _categories = categoryJson.map((json) => Category.fromJson(json)).toList();
+      // Sort categories by display order
+      _categories.sort((a, b) => a.displayOrder.compareTo(b.displayOrder));
 
-      // 모든 카테고리의 어휘 항목 가져오기
-      _vocabularyItems = [];
-      for (var category in _categories) {
-        final items = await _apiService.getVocabularyByCategory(category.id);
-        _vocabularyItems.addAll(items);
+    } catch (e) {
+      print("Error fetching categories: $e");
+      _categories = []; // Clear on error to indicate failure
+    } finally {
+       await _setLoadingCategories(false);
+    }
+  }
+
+    Future<void> fetchVocabularyItems({required String categoryId}) async {
+      await _setLoadingItems(true);
+      // Don't clear items immediately if you want to show old items while loading new ones
+      // _items = [];
+      // notifyListeners(); // Update UI to show loading for items
+      try {
+        // API 3.2 fetches vocabulary for a specific category
+        final response = await _apiService.getVocabularyByCategory(categoryId);
+         final List<dynamic> itemJson = response.data['items'] ?? [];
+         _items = itemJson.map((json) => VocabularyItem.fromJson(json)).toList();
+         // Sort items by display order
+         _items.sort((a,b) => a.displayOrder.compareTo(b.displayOrder));
+      } catch (e) {
+         print("Error fetching vocabulary items for category $categoryId: $e");
+         _items = []; // Clear items on error
+      } finally {
+         await _setLoadingItems(false);
       }
-
-      _isLoading = false;
-      notifyListeners();
-    } catch (e) {
-      print('어휘 데이터 초기화 오류: $e');
-      _error = '데이터를 불러오는 중 오류가 발생했습니다.';
-      _isLoading = false;
-      notifyListeners();
-
-      // 오류 발생 시에도 로컬 데이터 시도 (나중에 구현 예정)
-    }
-  }
-
-  // 데이터 새로고침
-  Future<void> refreshData() async {
-    await _initializeData();
-  }
-
-  // 카테고리별 어휘 항목 가져오기
-  Future<List<VocabularyItem>> getItemsByCategory(String categoryId) async {
-    try {
-      // 이미 로드된 데이터가 있으면 캐시에서 반환
-      if (_vocabularyItems.isNotEmpty) {
-        return _vocabularyItems
-            .where((item) => item.categoryId == categoryId)
-            .toList();
-      }
-
-      // 아직 데이터가 로드되지 않았으면 API 호출
-      return await _apiService.getVocabularyByCategory(categoryId);
-    } catch (e) {
-      print('카테고리별 어휘 항목 조회 오류: $e');
-      return [];
-    }
-  }
-
-  // ID로 카테고리 찾기
-  Category? getCategoryById(String categoryId) {
-    try {
-      return _categories.firstWhere((category) => category.id == categoryId);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // ID로 어휘 항목 찾기
-  VocabularyItem? getItemById(String itemId) {
-    try {
-      return _vocabularyItems.firstWhere((item) => item.id == itemId);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // 검색 쿼리 설정
-  void setSearchQuery(String query) {
-    _searchQuery = query;
-    notifyListeners();
-  }
-
-  // 검색 결과 가져오기 - 백엔드 API 사용
-  Future<List<VocabularyItem>> getSearchResults() async {
-    if (_searchQuery.isEmpty) {
-      return [];
     }
 
-    try {
-      return await _apiService.searchVocabulary(_searchQuery);
-    } catch (e) {
-      print('검색 오류: $e');
+    // --- Search Methods ---
+    Future<void> search(String query) async {
+       _searchQuery = query.trim(); // Trim whitespace
+       if (_searchQuery.isEmpty) {
+         clearSearch(); // Clear results if query is empty
+         return;
+       }
 
-      // API 오류 시 로컬 검색 수행
-      return _vocabularyItems.where((item) {
-        return item.text.toLowerCase().contains(_searchQuery.toLowerCase());
-      }).toList();
+       await _setLoadingSearch(true);
+       try {
+         // Search items via API
+         final itemResponse = await _apiService.searchVocabulary(query: _searchQuery);
+         final List<dynamic> itemJson = itemResponse.data['items'] ?? [];
+         _searchResults = itemJson.map((json) => VocabularyItem.fromJson(json)).toList();
+
+         // Client-side category search (can be slow for large category lists)
+         // Consider a dedicated backend endpoint for category search if performance is an issue.
+         _searchCategories = _categories.where((cat) =>
+            cat.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+            (cat.description?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false)
+         ).toList();
+
+       } catch (e) {
+         print("Error searching: $e");
+         _searchResults = [];
+         _searchCategories = [];
+       } finally {
+         await _setLoadingSearch(false);
+       }
     }
-  }
 
-  // 카테고리 검색 결과
-  List<Category> get searchCategories {
-    if (_searchQuery.isEmpty) {
-      return [];
-    }
+     // Called when the search input changes
+     void setSearchQuery(String query) {
+       if (query.isEmpty) {
+          clearSearch();
+       } else {
+          search(query);
+       }
+     }
 
-    return _categories.where((category) {
-      return category.name.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
-  }
+      // Clears search query and results
+     void clearSearch() {
+         _searchQuery = '';
+         _searchResults = [];
+         _searchCategories = [];
+         _isLoadingSearch = false; // Ensure loading is off
+         notifyListeners();
+     }
 
-  // 검색 결과 getter
-  List<VocabularyItem> get searchResults {
-    if (_searchQuery.isEmpty) {
-      return [];
-    }
-
-    return _vocabularyItems.where((item) {
-      return item.text.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
-  }
-
-  // 어휘 사용 기록 추가
-  Future<bool> recordItemUsage(String itemId) async {
-    try {
-      await _apiService.addUsageRecord(itemId);
-      return true;
-    } catch (e) {
-      print('사용 기록 추가 오류: $e');
-      return false;
-    }
-  }
-
-  // 최근 사용 항목 가져오기
-  Future<List<VocabularyItem>> getRecentlyUsedItems({int limit = 10}) async {
-    try {
-      final recentUsage = await _apiService.getRecentUsage(limit: limit);
-      List<VocabularyItem> recentItems = [];
-
-      for (var usage in recentUsage) {
-        final itemId = usage['item_id'];
-        final item = getItemById(itemId);
-
-        if (item != null) {
-          recentItems.add(item);
+    // --- Helper Methods ---
+    // Helper to get category by ID
+    Category? getCategoryById(String id) {
+        try {
+          // Use firstWhereOrNull for safer lookup (requires collection package)
+          // Or use try-catch
+          return _categories.firstWhere((cat) => cat.id == id);
+        } catch (e) {
+          return null; // Not found
         }
       }
-
-      return recentItems;
-    } catch (e) {
-      print('최근 사용 항목 조회 오류: $e');
-      return [];
-    }
-  }
 }

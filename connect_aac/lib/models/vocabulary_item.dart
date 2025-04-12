@@ -1,44 +1,58 @@
-// lib/models/vocabulary_item.dart 업데이트
+// lib/models/vocabulary_item.dart
 class VocabularyItem {
   final String id;
   final String text;
-  final String imageAsset;
+  final String? imagePath; // API returns path, adjust if it returns full URL
   final String categoryId;
-  final bool isCustom;
-  final DateTime? createdAt;
+  final int displayOrder; // Added based on API spec
 
-  const VocabularyItem({
+  VocabularyItem({
     required this.id,
     required this.text,
-    required this.imageAsset,
+    this.imagePath,
     required this.categoryId,
-    this.isCustom = false,
-    this.createdAt,
+    required this.displayOrder,
   });
 
-  // JSON 직렬화
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'text': text,
-      'imageAsset': imageAsset,
-      'categoryId': categoryId,
-      'isCustom': isCustom,
-      'createdAt': createdAt?.toIso8601String(),
-    };
-  }
-
-  // JSON 역직렬화
   factory VocabularyItem.fromJson(Map<String, dynamic> json) {
     return VocabularyItem(
-      id: json['item_id'] ?? json['id'] ?? '',
-      text: json['text'] ?? '',
-      imageAsset: json['image_path'] ?? json['imageAsset'] ?? '',
-      categoryId: json['category_id'] ?? json['categoryId'] ?? '',
-      isCustom: json['isCustom'] ?? json['is_custom'] ?? false,
-      createdAt: json['created_at'] != null
-          ? DateTime.parse(json['created_at'])
-          : null,
+      id: json['item_id'] as String,
+      text: json['text'] as String,
+      imagePath: json['image_path'] as String?,
+      categoryId: json['category_id'] as String,
+      // Provide a default value if display_order might be null/missing
+      displayOrder: (json['display_order'] ?? 0) as int,
     );
   }
+
+   // Helper to construct full image URL if base URL is known and API returns path
+   String? get fullImageUrl {
+     // TODO: Confirm how image paths are returned and adjust base URL if needed
+     const String imageBaseUrl = "http://localhost:5000"; // Example base URL
+
+     if (imagePath != null && imagePath!.isNotEmpty) {
+        // Option 1: If API returns full URL already
+        // if (imagePath!.startsWith('http')) {
+        //   return imagePath;
+        // }
+
+        // Option 2: If API returns path relative to server root (e.g., /uploads/image.png)
+        // if (imagePath!.startsWith('/')) {
+        //   return '$imageBaseUrl$imagePath';
+        // }
+
+        // Option 3: If API returns path relative to a specific folder (e.g., images/image.png)
+        // return '$imageBaseUrl/path/to/images/$imagePath';
+
+        // Option 4: If API returns path usable by Flutter assets (e.g., assets/images/...)
+        // This seems likely based on the initial data structure provided
+         if (imagePath!.startsWith('assets/')) {
+            return imagePath;
+         }
+
+         // Fallback/Default: Assume relative path needs base URL (adjust as needed)
+         return '$imageBaseUrl/$imagePath';
+     }
+     return null;
+   }
 }

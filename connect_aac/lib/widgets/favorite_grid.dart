@@ -1,10 +1,11 @@
 // lib/widgets/favorite_grid.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../models/vocabulary_item.dart';
 import '../providers/favorites_provider.dart';
 import '../utils/app_theme.dart';
 import 'word_card.dart';
+import '../models/vocabulary_item.dart'; // Import VocabularyItem
+import '../models/favorite.dart';
 
 class FavoriteGrid extends StatelessWidget {
   const FavoriteGrid({super.key});
@@ -33,7 +34,7 @@ class FavoriteGrid extends StatelessWidget {
           );
         }
 
-        final favorites = favoritesProvider.favorites;
+        final List<Favorite> favorites = favoritesProvider.favorites;
 
         if (favorites.isEmpty) {
           return SizedBox(
@@ -53,8 +54,18 @@ class FavoriteGrid extends StatelessWidget {
           ),
           itemCount: favorites.length,
           itemBuilder: (context, index) {
+            final favorite = favorites[index];
+            // Create a VocabularyItem from the Favorite object's data
+            final vocabularyItem = VocabularyItem(
+              id: favorite.itemId,
+              text: favorite.text,
+              imagePath: favorite.imagePath,
+              categoryId: favorite.categoryId,
+              displayOrder: favorite.displayOrder,
+            );
             return WordCard(
-              item: favorites[index],
+              item: vocabularyItem, // Pass the created VocabularyItem
+              isFavorite: true,
             );
           },
         );
